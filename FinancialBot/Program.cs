@@ -1,21 +1,35 @@
-﻿using Telegram.Bot;
+﻿using Google.Ai.Generativelanguage.V1Beta2;
+using Microsoft.Extensions.Configuration;
+using System.Threading;
+using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace FinancialBot
 {
     internal class Program
     {
-        private static readonly string token = "8159298599:AAGPkIEtfH85CJKBiDGTEsmQXyQQew725_w";
-        private static TelegramBotClient botClient;
+        private static string? token;
+        private static TelegramBotClient? botClient;
         private static AnketaService anketaService = new();
+        private static AIService? aiService;
 
         static void Main(string[] args)
         {
+            // Инициализация конфигурации
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json")
+                .Build();
+
+            token = configuration["AppSettings:TelegramBotToken"];
+
             botClient = new TelegramBotClient(token);
+            aiService = new AIService(configuration);
 
             //InitBotCommands().GetAwaiter().GetResult();
 
@@ -33,6 +47,7 @@ namespace FinancialBot
                 cancellationToken: cts.Token
             );
 
+            //botClient.DeleteWebhook();
             Console.WriteLine("Бот запущен.");
             Console.ReadLine();
         }
@@ -74,17 +89,23 @@ namespace FinancialBot
             long userId = message.From.Id;
             string text = message.Text;
 
+/*            if(text.StartsWith('/'))
+            {
+                await InitBotCommands(text);
+            }*/
+
             if (text == "/start")
             {
-                var keyboard = new ReplyKeyboardMarkup(new[]
-                {
-        new KeyboardButton[] { "📋 Начать анкету", "ℹ️ Помощь" }
-    })
-                {
-                    ResizeKeyboard = true,
-                    OneTimeKeyboard = false
-                };
-
+                var keyboard = 
+                    new ReplyKeyboardMarkup(new[]
+                    {
+                        new KeyboardButton[] { "📋 Начать анкету", "ℹ️ Помощь" }
+                    })
+                    {
+                        ResizeKeyboard = true,
+                        OneTimeKeyboard = false
+                    };
+                //await aiService.GetGeminiResponse();
                 await bot.SendMessage(
                     chatId: message.Chat.Id,
                     text: "👋 Привет! Я бот, который поможет тебе с инвестициями.",
@@ -93,7 +114,7 @@ namespace FinancialBot
                 return;
             }
 
-            if (text == "/help")
+            if (text == "/help" || text == "ℹ️ Помощь")
             {
                 string helpText = "📘 *Помощь*\n\n" +
                                   "Я инвестиционный бот. Вот что я умею:\n\n" +
@@ -116,10 +137,7 @@ namespace FinancialBot
             if (text == "📋 Начать анкету" || text == "/profile")
             {
                 anketaService.StartAnketa(userId);
-                var keyboard = new ReplyKeyboardMarkup(new[]
-                {
-        new KeyboardButton[] { "◀️ Назад" }
-    })
+                var keyboard = new ReplyKeyboardMarkup (new[] {new KeyboardButton[] { "◀️ Назад" }})
                 {
                     ResizeKeyboard = true,
                     OneTimeKeyboard = false
@@ -143,14 +161,16 @@ namespace FinancialBot
                     await bot.SendMessage(
                         chatId: message.Chat.Id,
                         text: previousQuestion,
-                        cancellationToken: cancellationToken);
+                        cancellationToken: cancellationToken
+                    );
                 }
                 else
                 {
                     await bot.SendMessage(
                         chatId: message.Chat.Id,
                         text: "Вы находитесь на первом вопросе анкеты.",
-                        cancellationToken: cancellationToken);
+                        cancellationToken: cancellationToken
+                    );
                 }
                 return;
             }
@@ -160,19 +180,39 @@ namespace FinancialBot
 
             if (result.Question != null)
             {
-                // Вопрос 2 — кнопки про риск
-                if (result.Question.Contains("риску"))
+                // Вопрос 2 — кнопки про срок
+                if (result.Question.Contains("в месяц"))
                 {
-                    var riskKeyboard = new ReplyKeyboardMarkup(new[]
-                    {
-                new KeyboardButton[] { "Негативно", "Нейтрально", "Положительно"},
-                            ["◀️ Назад"]
+                    var horizonKeyboard = 
+                        new ReplyKeyboardMarkup(new[] 
+                        { 
+                            new KeyboardButton[] { "Я тунеядец", "Меньше $500", "$500–1000", "$1000–3000", "$3000+" }, 
+                            ["◀️ Назад"] 
+                        })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
 
-            })
-                    {
-                        ResizeKeyboard = true,
-                        OneTimeKeyboard = true
-                    };
+                    await bot.SendMessage(
+                        chatId: message.Chat.Id,
+                        text: result.Question,
+                        replyMarkup: horizonKeyboard,
+                        cancellationToken: cancellationToken
+                    );
+                }
+                // Вопрос 3 — кнопки про риск
+                else if (result.Question.Contains("риску"))
+                {
+                    var riskKeyboard = 
+                        new ReplyKeyboardMarkup(new[]
+                        {
+                            new KeyboardButton[] 
+                            { "Негативно", "Нейтрально", "Положительно"}, ["◀️ Назад"] })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
 
                     await bot.SendMessage(
                         chatId: message.Chat.Id,
@@ -180,25 +220,116 @@ namespace FinancialBot
                         replyMarkup: riskKeyboard,
                         cancellationToken: cancellationToken);
                 }
-                // Вопрос 3 — кнопки про срок
+
+                // Вопрос 4 — кнопки про срок
                 else if (result.Question.Contains("срок"))
                 {
-                    var horizonKeyboard = new ReplyKeyboardMarkup(new[]
-                    {
-                new KeyboardButton[] { "Краткосрочно", "Среднесрочно", "Долгосрочно" },
-                ["◀️ Назад"]
-            })
-                    {
-                        ResizeKeyboard = true,
-                        OneTimeKeyboard = true
-                    };
+                    var horizonKeyboard = 
+                        new ReplyKeyboardMarkup(new[]
+                        {
+                            new KeyboardButton[] { "Краткосрочно", "Среднесрочно", "Долгосрочно" },
+                            ["◀️ Назад"]
+                        })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
 
                     await bot.SendMessage(
                         chatId: message.Chat.Id,
                         text: result.Question,
                         replyMarkup: horizonKeyboard,
-                        cancellationToken: cancellationToken);
+                        cancellationToken: cancellationToken
+                    );
                 }
+
+                // Вопрос 5 — кнопки про часть дохода
+                else if (result.Question.Contains("дохода"))
+                {
+                    var horizonKeyboard = 
+                        new ReplyKeyboardMarkup(new[]
+                        {
+                            new KeyboardButton[] { "Меньше 10%", "10–30%", "30–50%", "Более 50%" },
+                            ["◀️ Назад"]
+                        })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
+
+                    await bot.SendMessage(
+                        chatId: message.Chat.Id,
+                        text: result.Question,
+                        replyMarkup: horizonKeyboard,
+                        cancellationToken: cancellationToken
+                    );
+                }
+
+                // Вопрос 6 — кнопки про подушку
+                else if (result.Question.Contains("подушка"))
+                {
+                    var horizonKeyboard =
+                        new ReplyKeyboardMarkup(new[]
+                        {
+                            new KeyboardButton[] { "Да", "Нет" }, ["◀️ Назад"]
+                        })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
+
+                    await bot.SendMessage(
+                        chatId: message.Chat.Id,
+                        text: result.Question,
+                        replyMarkup: horizonKeyboard,
+                        cancellationToken: cancellationToken
+                    );
+                }
+
+                // Вопрос 7 — кнопки про опыт
+                else if (result.Question.Contains("опыт"))
+                {
+                    var experienceKeyboard =
+                        new ReplyKeyboardMarkup(new[]
+                        {
+                            new KeyboardButton[] { "Нет", "Базовый", "Продвинутый" },
+                            ["◀️ Назад"]
+                        })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
+
+                    await bot.SendMessage(
+                        chatId: message.Chat.Id,
+                        text: result.Question,
+                        replyMarkup: experienceKeyboard,
+                        cancellationToken: cancellationToken
+                    );
+                }
+
+                // Вопрос 8 — кнопки про частоту
+                else if (result.Question.Contains("частоту"))
+                {
+                    var frequencyKeyboard =
+                        new ReplyKeyboardMarkup(new[]
+                        {
+                            new KeyboardButton[] { "Редко", "Раз в год", "Часто" },
+                            ["◀️ Назад"]
+                        })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
+
+                    await bot.SendMessage(
+                        chatId: message.Chat.Id,
+                        text: result.Question,
+                        replyMarkup: frequencyKeyboard,
+                        cancellationToken: cancellationToken
+                    );
+                }
+
                 // Простой текстовый вопрос
                 else
                 {
@@ -215,7 +346,8 @@ namespace FinancialBot
                 var recommendationText = $"🎯 Ваш инвестиционный профиль: {rec.Profile}\n\n" +
                                          $"📈 Стратегия: {rec.Strategy}\n\n" +
                                          $"💼 Рекомендуемые продукты:\n" +
-                                         string.Join("\n", rec.Products);
+                                         string.Join("\n", rec.Products) +
+                                         "\n\nAI Powered Answer:\n" + rec.Other;
 
                 // Убираем клавиатуру
                 await bot.SendMessage(
@@ -227,12 +359,12 @@ namespace FinancialBot
                 // Показываем inline-кнопки
                 var buttons = new InlineKeyboardMarkup(new[]
                 {
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("📊 Подробнее о продуктах", $"info_{userId}"),
-                InlineKeyboardButton.WithCallbackData("🔁 Пройти снова", "/profile")
-            }
-        });
+                    new[]
+                    {
+                        InlineKeyboardButton.WithCallbackData("📊 Подробнее о продуктах", $"info_{userId}"),
+                        InlineKeyboardButton.WithCallbackData("🔁 Пройти снова", "/profile")
+                    }
+                });
 
                 await bot.SendMessage(
                     chatId: message.Chat.Id,
@@ -258,13 +390,25 @@ namespace FinancialBot
 
         private static async Task InitBotCommands()
         {
-            await botClient.SetMyCommands(new[]
+/*            if (text == "/start")
             {
-        new BotCommand { Command = "start", Description = "Начать работу с ботом" },
-        new BotCommand { Command = "profile", Description = "Пройти анкету" }
-        // Добавь другие команды, если нужно
-    });
+                var keyboard =
+                    new ReplyKeyboardMarkup(new[]
+                    {
+                        new KeyboardButton[] { "📋 Начать анкету", "ℹ️ Помощь" }
+                    })
+                    {
+                        ResizeKeyboard = true,
+                        OneTimeKeyboard = false
+                    };
+                //await aiService.GetGeminiResponse();
+                await botClient.SendMessage(
+                    chatId: message.Chat.Id,
+                    text: "👋 Привет! Я бот, который поможет тебе с инвестициями.",
+                    replyMarkup: keyboard,
+                    cancellationToken: cancellationToken);
+                return;
+            }*/
         }
-
     }
 }

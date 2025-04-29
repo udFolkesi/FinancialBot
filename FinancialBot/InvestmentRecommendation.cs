@@ -11,6 +11,7 @@ namespace FinancialBot
         public string Profile { get; set; }
         public string Strategy { get; set; }
         public List<string> Products { get; set; }
+        public string? Other { get; set; }
     }
 
 }
